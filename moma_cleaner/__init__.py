@@ -1,145 +1,201 @@
 #!/usr/bin/env python3
 """
 MomaCleaner - AI-Powered File Organizer
-Main entry point
+Now with REAL AI using MiniMax-M2.5
 """
 import os
-import argparse
-import logging
+import requests
+import json
 from datetime import datetime
 from pathlib import Path
 
-from cleaner.scanner import FileScanner
-from cleaner.categorizer import FileCategorizer
-from cleaner.namer import AINamer
-from cleaner.deduplicator import Deduplicator
-from cleaner.config import Config
+# MiniMax API
+API_KEY = "sk-api-t3NvNNPlbsqIFLbqGrhlwMNTzUyPk2fqbGEg25SWSNSjgUPb9bl797i8tf53yqZfFAbwFxL9-89ioQ2U0vpWk_MR3gsDPXWHRBM_EaKCCmjEZL6GduxIn0k"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+class MomaCleanerAI:
+    def __init__(self):
+        self.categories = {
+            'Images': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'],
+            'Videos': ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv'],
+            'Documents': ['.pdf', '.doc', '.docx', '.txt', '.md', '.ppt', '.pptx'],
+            'Archives': ['.zip', '.rar', '.7z', '.tar', '.gz'],
+            'Code': ['.py', '.js', '.ts', '.java', '.c', '.cpp', '.html', '.css'],
+            'Music': ['.mp3', '.wav', '.flac', '.aac', '.ogg'],
+            'Data': ['.json', '.xml', '.csv', '.sql', '.db']
+        }
+        
+    def ask_ai(self, prompt):
+        """Ask MiniMax AI"""
+        url = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {API_KEY}"
+        }
+        data = {
+            "model": "MiniMax-M2.5",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7
+        }
+        r = requests.post(url, headers=headers, json=data, timeout=30)
+        result = r.json()
+        if 'choices' in result and result['choices']:
+            return result['choices'][0]['message']['content']
+        return "AI unavailable"
+        
+    def scan_folder(self, path):
+        """Scan folder for files"""
+        files = []
+        
+        for root, dirs, filenames in os.walk(path):
+            for f in filenames:
+                filepath = Path(root) / f
+                try:
+                    stat = filepath.stat()
+                    files.append({
+                        'name': f,
+                        'path': str(filepath),
+                        'size': stat.st_size,
+                        'ext': filepath.suffix.lower(),
+                        'modified': datetime.fromtimestamp(stat.st_mtime)
+                    })
+                except:
+                    pass
+                    
+        return files
+        
+    def categorize_file(self, filepath):
+        """Categorize a file"""
+        ext = Path(filepath).suffix.lower()
+        
+        for category, extensions in self.categories.items():
+            if ext in extensions:
+                return category
+                
+        return 'Other'
+        
+    def analyze_with_ai(self, files):
+        """Use AI to analyze files and give recommendations"""
+        # Build file summary
+        by_category = {}
+        for f in files:
+            cat = self.categorize_file(f['path'])
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(f['name'])
+        
+        summary = "文件统计:\n"
+        for cat, names in by_category.items():
+            summary += f"- {cat}: {len(names)} 个文件\n"
+        
+        # Old files
+        old_files = [f for f in files if (datetime.now() - f['modified']).days > 30]
+        if old_files:
+            summary += f"- 超过30天的文件: {len(old_files)} 个\n"
+        
+        # Large files
+        large_files = [f for f in files if f['size'] > 100*1024*1024]  # > 100MB
+        if large_files:
+            summary += f"- 大文件(>100MB): {len(large_files)} 个\n"
+        
+        prompt = f"""你是一个文件管理专家。请分析以下文件夹的文件情况，给出整理建议:
 
+{summary}
 
-class MomaCleaner:
-    """AI-Powered File Organizer"""
-    
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config = Config(config_path)
-        self.scanner = FileScanner(self.config)
-        self.categorizer = FileCategorizer(self.config)
-        self.namer = AINamer(self.config)
-        self.dedup = Deduplicator(self.config)
+请用中文给出:
+1. 文件分布分析
+2. 整理建议 (哪些可以删除、哪些应该归档)
+3. 存储优化建议
+
+回答要实用，控制在150字以内。"""
         
-    def organize(self, path: str, dry_run: bool = False, ai_name: bool = False):
-        """Organize files in a directory"""
-        path = Path(path).resolve()
+        return self.ask_ai(prompt)
         
-        if not path.exists():
-            logger.error(f"Path does not exist: {path}")
-            return
-            
-        logger.info(f"🧹 Starting MomaCleaner on: {path}")
-        logger.info(f"Dry run: {dry_run}")
+    def suggest_filename(self, filepath):
+        """Use AI to suggest a better filename"""
+        filename = Path(filepath).stem
+        ext = Path(filepath).suffix
         
-        # Scan files
-        logger.info("📂 Scanning files...")
-        files = self.scanner.scan(path)
-        logger.info(f"Found {len(files)} files")
+        prompt = f"""请为以下文件起一个更好的名字:
+
+原始文件名: {filename}
+文件类型: {ext}
+
+请给出3个建议的名称（简洁的），只用中文回答，一行一个。"""
         
-        # Categorize
-        logger.info("🏷️ Categorizing files...")
-        categorized = self.categorizer.categorize(files)
+        result = self.ask_ai(prompt)
+        return result
         
-        # Print summary
-        print("\n" + "="*60)
-        print("📊 ORGANIZATION SUMMARY")
-        print("="*60)
+    def analyze_duplicate(self, files):
+        """Analyze potential duplicates"""
+        by_name = {}
+        for f in files:
+            name = Path(f['path']).stem.lower()
+            if name not in by_name:
+                by_name[name] = []
+            by_name[name].append(f)
         
-        for category, file_list in categorized.items():
-            if file_list:
-                print(f"\n{category}: {len(file_list)} files")
-                for f in file_list[:5]:  # Show first 5
-                    print(f"  - {f.name}")
-                if len(file_list) > 5:
-                    print(f"  ... and {len(file_list) - 5} more")
-        
-        # AI naming
-        if ai_name:
-            logger.info("🤖 AI naming files...")
-            for category, file_list in categorized.items():
-                for f in file_list:
-                    new_name = self.namer.suggest_name(f)
-                    if new_name and new_name != f.stem:
-                        print(f"  📝 {f.name} → {new_name}{f.suffix}")
-        
-        # Deduplication
-        logger.info("🔍 Checking for duplicates...")
-        duplicates = self.dedup.find_duplicates(files)
+        duplicates = {k: v for k, v in by_name.items() if len(v) > 1}
         
         if duplicates:
-            print(f"\n⚠️ Found {len(duplicates)} duplicate groups:")
-            for group in duplicates[:5]:
-                print(f"  - {group[0].name} ({len(group)} copies)")
-        
-        # Execute or preview
-        if dry_run:
-            print("\n🔍 Dry run complete. Use without --dry-run to actually organize.")
-        else:
-            logger.info("📁 Organizing files...")
-            self._organize_files(categorized)
-            logger.info("✅ Organization complete!")
-            
-    def _organize_files(self, categorized: dict):
-        """Actually move files to their categories"""
-        # Implementation would move files to category folders
-        pass
-        
-    def clean_duplicates(self, path: str, keep: str = "newest"):
-        """Remove duplicate files"""
-        path = Path(path)
-        
-        logger.info("🔍 Scanning for duplicates...")
-        files = self.scanner.scan(path)
-        
-        duplicates = self.dedup.find_duplicates(files)
-        
-        if not duplicates:
-            logger.info("No duplicates found!")
-            return
-            
-        logger.info(f"Found {len(duplicates)} duplicate groups")
-        
-        # Remove duplicates
-        removed = self.dedup.remove_duplicates(duplicates, keep=keep)
-        
-        logger.info(f"Removed {removed} duplicate files")
+            prompt = f"""以下文件可能是重复的:
 
-
-def main():
-    parser = argparse.ArgumentParser(description="MomaCleaner - AI File Organizer")
-    parser.add_argument('--path', type=str, help='Path to organize')
-    parser.add_argument('--dry-run', action='store_true', help='Preview only')
-    parser.add_argument('--ai-name', action='store_true', help='AI rename files')
-    parser.add_argument('--dedup', action='store_true', help='Remove duplicates')
-    parser.add_argument('--config', default='config.yaml', help='Config file')
-    parser.add_argument('--schedule', choices=['hourly', 'daily', 'weekly'],
-                       help='Schedule automatic cleaning')
-    
-    args = parser.parse_args()
-    
-    cleaner = MomaCleaner(args.config)
-    
-    if args.dedup and args.path:
-        cleaner.clean_duplicates(args.path)
-    elif args.path:
-        cleaner.organize(args.path, dry_run=args.dry_run, ai_name=args.ai_name)
-    elif args.schedule:
-        logger.info(f"Scheduling {args.schedule} cleaning...")
-    else:
-        parser.print_help()
+"""
+            for name, files_list in list(duplicates.items())[:5]:
+                prompt += f"- {name}: {len(files_list)} 个版本\n"
+            
+            prompt += "\n请给出清理建议，哪些应该保留，哪些可以删除？用中文回答，50字以内。"
+            return self.ask_ai(prompt)
+        
+        return "没有发现重复文件。"
+        
+    def run(self, path=None):
+        """Run file organizer"""
+        if not path:
+            path = os.path.expanduser("~/Downloads")
+        
+        print("\n" + "="*70)
+        print("🧹 MOMACLEANER - AI-POWERED FILE ORGANIZER")
+        print("="*70)
+        print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"🧠 Model: MiniMax-M2.5")
+        print(f"📂 扫描路径: {path}")
+        print("="*70)
+        
+        # Scan files
+        print("\n📂 扫描文件...")
+        files = self.scan_folder(path)
+        
+        print(f"   找到 {len(files)} 个文件")
+        
+        # Show categories
+        by_category = {}
+        for f in files:
+            cat = self.categorize_file(f['path'])
+            by_category[cat] = by_category.get(cat, 0) + 1
+        
+        print("\n📊 文件分类:")
+        for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
+            print(f"   - {cat}: {count}")
+        
+        # AI Analysis
+        print("\n" + "="*70)
+        print("🧠 AI 整理建议")
+        print("="*70)
+        
+        analysis = self.analyze_with_ai(files)
+        print(analysis)
+        
+        # Duplicate analysis
+        print("\n" + "="*70)
+        print("🔍 重复文件分析")
+        print("="*70)
+        
+        dup_analysis = self.analyze_duplicate(files)
+        print(dup_analysis)
+        
+        print("\n" + "="*70)
 
 
 if __name__ == "__main__":
-    main()
+    cleaner = MomaCleanerAI()
+    cleaner.run()
