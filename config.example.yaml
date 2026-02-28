@@ -1,0 +1,34 @@
+# MomaCleaner Configuration
+# Copy this to config.yaml and customize
+
+# Directories to exclude from scanning
+exclude_dirs:
+  - .git
+  - .svn
+  - node_modules
+  - __pycache__
+  - .DS_Store
+  - .Trash
+
+# File extensions to exclude
+exclude_exts:
+  - .tmp
+  - .temp
+  - .lock
+  - .log
+  - .part
+
+# How to organize files
+organize_by: category  # category, date, size
+
+# Enable deduplication
+dedup_enabled: true
+
+# Enable AI naming (requires API key)
+ai_name_enabled: false
+ai_api_key: YOUR_API_KEY
+
+# Auto-clean schedules
+schedules:
+  downloads: daily  # daily, weekly, monthly
+  desktop: weekly
